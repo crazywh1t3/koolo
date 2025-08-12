@@ -124,8 +124,10 @@ type CharacterCfg struct {
 			UseBladesOfIce    bool `yaml:"useBladesOfIce"`
 			UseFistsOfFire    bool `yaml:"useFistsOfFire"`
 		} `yaml:"mosaic_sin"`
+		PoisonNovaNecro struct {
+			Minions int `yaml:"minions"`
+		} `yaml:"poison_nova_necro"`
 	} `yaml:"character"`
-
 	Game struct {
 		MinGoldPickupThreshold int                   `yaml:"minGoldPickupThreshold"`
 		UseCainIdentify        bool                  `yaml:"useCainIdentify"`

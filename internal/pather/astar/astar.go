@@ -9,14 +9,8 @@ import (
 )
 
 var directions = []data.Position{
-	{0, 1},   // Down
-	{1, 0},   // Right
-	{0, -1},  // Up
-	{-1, 0},  // Left
-	{1, 1},   // Down-Right (Southeast)
-	{-1, 1},  // Down-Left (Southwest)
-	{1, -1},  // Up-Right (Northeast)
-	{-1, -1}, // Up-Left (Northwest)
+	{X: 0, Y: 1}, {X: 1, Y: 0}, {X: 0, Y: -1}, {X: -1, Y: 0}, // Основни посоки
+	{X: 1, Y: 1}, {X: -1, Y: 1}, {X: 1, Y: -1}, {X: -1, Y: -1}, // Диагонални посоки
 }
 
 type Node struct {
@@ -24,6 +18,7 @@ type Node struct {
 	Cost     int
 	Priority int
 	Index    int
+	Parent   *Node // НОВО: Добавяме връзка към родителя за по-лесно проследяване на пътя
 }
 
 func direction(from, to data.Position) (dx, dy int) {
@@ -36,53 +31,66 @@ func CalculatePath(g *game.Grid, start, goal data.Position) ([]data.Position, in
 	pq := make(PriorityQueue, 0)
 	heap.Init(&pq)
 
-	// Use a 2D slice to store the cost of each node
-	costSoFar := make([][]int, g.Width)
-	cameFrom := make([][]data.Position, g.Width)
-	for i := range costSoFar {
-		costSoFar[i] = make([]int, g.Height)
-		cameFrom[i] = make([]data.Position, g.Height)
-		for j := range costSoFar[i] {
-			costSoFar[i][j] = math.MaxInt32
-		}
-	}
+	// Използваме map за по-ефективно съхранение на вече посетените възли
+	nodes := make(map[data.Position]*Node)
 
 	startNode := &Node{Position: start, Cost: 0, Priority: heuristic(start, goal)}
+	nodes[start] = startNode
 	heap.Push(&pq, startNode)
-	costSoFar[start.X][start.Y] = 0
-
-	neighbors := make([]data.Position, 0, 8)
 
 	for pq.Len() > 0 {
 		current := heap.Pop(&pq).(*Node)
 
-		// Let's build the path if we reached the goal
 		if current.Position == goal {
 			var path []data.Position
-			for p := goal; p != start; p = cameFrom[p.X][p.Y] {
-				path = append([]data.Position{p}, path...)
+			p := current
+			for p != nil {
+				path = append([]data.Position{p.Position}, path...)
+				p = p.Parent
 			}
-			path = append([]data.Position{start}, path...)
 			return path, len(path), true
 		}
 
-		updateNeighbors(g, current, &neighbors)
+		// Генериране на съседи с подобрена логика
+		for _, dir := range directions {
+			neighborPos := data.Position{X: current.X + dir.X, Y: current.Y + dir.Y}
 
-		for _, neighbor := range neighbors {
-			newCost := costSoFar[current.X][current.Y] + getCost(g.CollisionGrid[neighbor.Y][neighbor.X])
+			// Проверка дали съседът е в границите на картата
+			if neighborPos.X < 0 || neighborPos.X >= g.Width || neighborPos.Y < 0 || neighborPos.Y >= g.Height {
+				continue
+			}
 
-			// Handicap for changing direction, this prevents zig-zagging around obstacles
-			//curDirX, curDirY := direction(cameFrom[current.X][current.Y], current.Position)
-			//newDirX, newDirY := direction(current.Position, neighbor)
-			//if curDirX != newDirX || curDirY != newDirY {
-			//	newCost++
-			//}
+			// ПРОМЕНЕНО: Проверка за "рязане" на ъгли при диагонално движение
+			if dir.X != 0 && dir.Y != 0 { // Ако е диагонал
+				// Проверяваме дали съседните плочки по X и Y са проходими
+				if g.CollisionGrid[current.Y][current.X+dir.X] > game.CollisionTypeWalkable || g.CollisionGrid[current.Y+dir.Y][current.X] > game.CollisionTypeWalkable {
+					continue
+				}
+			}
 
-			if newCost < costSoFar[neighbor.X][neighbor.Y] {
-				costSoFar[neighbor.X][neighbor.Y] = newCost
-				priority := newCost + int(0.5*float64(heuristic(neighbor, goal)))
-				heap.Push(&pq, &Node{Position: neighbor, Cost: newCost, Priority: priority})
-				cameFrom[neighbor.X][neighbor.Y] = current.Position
+			// Изчисляване на цената за движение до този съсед
+			newCost := current.Cost + getCost(g, neighborPos)
+
+			// ПРОМЕНЕНО: Добавяне на "наказание" за смяна на посоката, за да се избегне зигзаг
+			if current.Parent != nil {
+				curDirX, curDirY := direction(current.Parent.Position, current.Position)
+				newDirX, newDirY := direction(current.Position, neighborPos)
+				if curDirX != newDirX || curDirY != newDirY {
+					newCost++ // Малко наказание за завой
+				}
+			}
+
+			// Ако сме намерили по-добър път до този съсед
+			if node, found := nodes[neighborPos]; !found || newCost < node.Cost {
+				priority := newCost + heuristic(neighborPos, goal)
+				neighborNode := &Node{
+					Position: neighborPos,
+					Cost:     newCost,
+					Priority: priority,
+					Parent:   current,
+				}
+				nodes[neighborPos] = neighborNode
+				heap.Push(&pq, neighborNode)
 			}
 		}
 	}
@@ -90,39 +98,41 @@ func CalculatePath(g *game.Grid, start, goal data.Position) ([]data.Position, in
 	return nil, 0, false
 }
 
-// Get walkable neighbors of a given node
-func updateNeighbors(grid *game.Grid, node *Node, neighbors *[]data.Position) {
-	*neighbors = (*neighbors)[:0]
+// ПРОМЕНЕНО: getCost вече взима предвид и съседните плочки
+func getCost(grid *game.Grid, pos data.Position) int {
+	baseCost := 0
+	tileType := grid.CollisionGrid[pos.Y][pos.X]
 
-	x, y := node.X, node.Y
-	gridWidth, gridHeight := grid.Width, grid.Height
-
-	for _, d := range directions {
-		newX, newY := x+d.X, y+d.Y
-		// Check if the new neighbor is within grid bounds
-		if newX >= 0 && newX < gridWidth && newY >= 0 && newY < gridHeight {
-			*neighbors = append(*neighbors, data.Position{X: newX, Y: newY})
-		}
-	}
-}
-
-func getCost(tileType game.CollisionType) int {
 	switch tileType {
 	case game.CollisionTypeWalkable:
-		return 1 // Walkable
+		baseCost = 1
 	case game.CollisionTypeMonster:
-		return 16
+		baseCost = 16
 	case game.CollisionTypeObject:
-		return 4 // Soft blocker
+		baseCost = 4
 	case game.CollisionTypeLowPriority:
-		return 20
+		baseCost = 20
 	default:
-		return math.MaxInt32
+		return math.MaxInt32 // Непроходимо
 	}
+
+	// ПРОМЕНЕНО: Добавяне на "наказание" за близост до стени/препятствия
+	// Това кара пътеката да стои по-далеч от стените
+	for _, d := range directions {
+		checkPos := data.Position{X: pos.X + d.X, Y: pos.Y + d.Y}
+		if checkPos.X >= 0 && checkPos.X < grid.Width && checkPos.Y >= 0 && checkPos.Y < grid.Height {
+			if grid.CollisionGrid[checkPos.Y][checkPos.X] == game.CollisionTypeNonWalkable {
+				baseCost += 2 // Добавяме допълнителна цена, ако е до стена
+			}
+		}
+	}
+
+	return baseCost
 }
 
 func heuristic(a, b data.Position) int {
+	// Манхатън разстояние с лека корекция за диагонали
 	dx := math.Abs(float64(a.X - b.X))
 	dy := math.Abs(float64(a.Y - b.Y))
-	return int(dx + dy + (math.Sqrt(2)-2)*math.Min(dx, dy))
+	return int(dx + dy)
 }

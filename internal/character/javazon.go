@@ -12,13 +12,13 @@ import (
 	"github.com/hectorgimenez/d2go/pkg/data/stat"
 	"github.com/hectorgimenez/koolo/internal/action/step"
 	"github.com/hectorgimenez/koolo/internal/game"
-	"github.com/hectorgimenez/koolo/internal/pather"
+	
 )
 
 const (
 	maxJavazonAttackLoops = 10
-	minJavazonDistance    = 10
-	maxJavazonDistance    = 30
+	minJavazonDistance    = 5  // Намалено за по-добра реакция
+	maxJavazonDistance    = 15 // Намалено за по-агресивна игра
 )
 
 type Javazon struct {
@@ -26,6 +26,7 @@ type Javazon struct {
 }
 
 func (s Javazon) CheckKeyBindings() []skill.ID {
+	// ... (без промяна тук) ...
 	requireKeybindings := []skill.ID{skill.LightningFury, skill.TomeOfTownPortal}
 	missingKeybindings := []skill.ID{}
 
@@ -73,30 +74,18 @@ func (s Javazon) KillMonsterSequence(
 			return nil
 		}
 
-		closeMonsters := 0
-		for _, mob := range s.Data.Monsters {
-			if mob.IsPet() || mob.IsMerc() || mob.IsGoodNPC() || mob.IsSkip() || monster.Stats[stat.Life] <= 0 && mob.UnitID != monster.UnitID {
-				continue
-			}
-			if pather.DistanceFromPoint(mob.Position, monster.Position) <= 15 {
-				closeMonsters++
-			}
-			if closeMonsters >= 3 {
-				break
-			}
-		}
-
-		if closeMonsters >= 3 {
-			step.SecondaryAttack(skill.LightningFury, id, numOfAttacks, step.Distance(minJavazonDistance, maxJavazonDistance))
-		} else {
-			step.PrimaryAttack(id, numOfAttacks, false, step.Distance(1, 1))
-		}
+		// КОРИГИРАНО: Логиката за броене на чудовища е премахната.
+		// Javazon-ката вече ВИНАГИ ще използва Lightning Fury от разстояние.
+		// Това решава проблема с "телепорт-стъпкването" върху единични цели.
+		step.SecondaryAttack(skill.LightningFury, id, numOfAttacks, step.Distance(minJavazonDistance, maxJavazonDistance))
 
 		completedAttackLoops++
 		previousUnitID = int(id)
 	}
 }
 
+// ... останалата част от файла остава без промяна ...
+// KillBossSequence, killMonster, killBoss, PreCTABuffSkills, etc...
 func (s Javazon) KillBossSequence(
 	monsterSelector func(d game.Data) (data.UnitID, bool),
 	skipOnImmunities []stat.Resist,
@@ -125,7 +114,8 @@ func (s Javazon) KillBossSequence(
 		completedAttackLoops++
 		previousUnitID = int(id)
 
-		step.PrimaryAttack(id, numOfAttacks, false, step.Distance(1, 1))
+		// За босове, атаката отблизо (Charged Strike) е приемлива.
+		step.PrimaryAttack(id, numOfAttacks, false, step.Distance(1, 3))
 	}
 }
 

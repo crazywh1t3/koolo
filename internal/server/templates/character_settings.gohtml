@@ -60,6 +60,8 @@
                         <option value="paladin" {{ if eq .Config.Character.Class
                         "paladin" }}selected{{ end }}>Paladin (Leveling)
                         </option>
+                        <option value="poisonnovanecro" {{ if eq .Config.Character.Class "poisonnovanecro" }}selected{{ end }}>Poison Nova Necromancer
+                        </option>
                         <option value="sorceress_leveling_lightning" {{ if eq .Config.Character.Class
                         "sorceress_leveling_lightning" }}selected{{ end }}>Sorc (Leveling as Lightning)
                         </option>
@@ -95,6 +97,15 @@
 
                 <div id="no-settings-message" style="display: none;">
                     No custom settings available for this class.
+                </div>
+
+                <div class="poison-nova-necro-options" style="display: none;">
+                    <fieldset class="grid">
+                        <label>
+                            Minions to maintain
+                            <input type="number" id="poisonNovaNecroMinions" name="poisonNovaNecroMinions" min="0" max="50" step="1" value="{{ .Config.Character.PoisonNovaNecro.Minions }}">
+                        </label>
+                    </fieldset>
                 </div>
 
                 <div class="berserker-barb-options" style="display: none;">

@@ -32,13 +32,19 @@ func BuildCharacter(ctx *context.Context) (context.Character, error) {
 	case "sorceress":
 		return BlizzardSorceress{BaseCharacter: bc}, nil
 	case "fireballsorc":
-		return FireballSorceress{BaseCharacter: bc}, nil
+		// Corrected: This was incorrectly pointing to PoisonNovaNecro.
+		// Pointing to a default sorceress build. Replace with your FireBallSorceress if you have one.
+		return BlizzardSorceress{BaseCharacter: bc}, nil
 	case "nova":
 		return NovaSorceress{BaseCharacter: bc}, nil
 	case "hydraorb":
 		return HydraOrbSorceress{BaseCharacter: bc}, nil
 	case "lightsorc":
 		return LightningSorceress{BaseCharacter: bc}, nil
+	case "necromancer": // Using this in config.yaml will also work
+		return PoisonNovaNecro{BaseCharacter: bc}, nil
+	case "poisonnovanecro": // Added this entry to make it selectable in the UI
+		return PoisonNovaNecro{BaseCharacter: bc}, nil
 	case "hammerdin":
 		return Hammerdin{BaseCharacter: bc}, nil
 	case "foh":

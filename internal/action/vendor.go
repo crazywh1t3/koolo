@@ -34,20 +34,26 @@ func VendorRefill(forceRefill, sellJunk bool) error {
 		return err
 	}
 
-	// Jamella trade button is the first one
+	// Jamella trade button is the first one, the rest are the second
 	if vendorNPC == npc.Jamella {
 		ctx.HID.KeySequence(win.VK_HOME, win.VK_RETURN)
 	} else {
 		ctx.HID.KeySequence(win.VK_HOME, win.VK_DOWN, win.VK_RETURN)
 	}
-
-	SwitchStashTab(4)
 	ctx.RefreshGameData()
-	town.BuyConsumables(forceRefill)
 
+	// First we sell junk
 	if sellJunk {
+		ctx.Logger.Info("Selling junk items first...")
 		town.SellJunk()
+		// Опресняваме данните след продажба, за да се актуализира златото
+		ctx.RefreshGameData()
 	}
+
+	// Then we buy what we need.
+	ctx.Logger.Info("Checking for consumables to buy...")
+	SwitchStashTab(4) // Assuming consumables are on this tab
+	town.BuyConsumables(forceRefill)
 
 	return step.CloseAllMenus()
 }
