@@ -9,8 +9,8 @@ import (
 )
 
 var directions = []data.Position{
-	{X: 0, Y: 1}, {X: 1, Y: 0}, {X: 0, Y: -1}, {X: -1, Y: 0}, // Основни посоки
-	{X: 1, Y: 1}, {X: -1, Y: 1}, {X: 1, Y: -1}, {X: -1, Y: -1}, // Диагонални посоки
+	{X: 0, Y: 1}, {X: 1, Y: 0}, {X: 0, Y: -1}, {X: -1, Y: 0}, // Main directions
+	{X: 1, Y: 1}, {X: -1, Y: 1}, {X: 1, Y: -1}, {X: -1, Y: -1}, // Diagonal directions
 }
 
 type Node struct {
@@ -18,7 +18,7 @@ type Node struct {
 	Cost     int
 	Priority int
 	Index    int
-	Parent   *Node // НОВО: Добавяме връзка към родителя за по-лесно проследяване на пътя
+	Parent   *Node // NEW: For easier tracking
 }
 
 func direction(from, to data.Position) (dx, dy int) {
@@ -31,7 +31,7 @@ func CalculatePath(g *game.Grid, start, goal data.Position) ([]data.Position, in
 	pq := make(PriorityQueue, 0)
 	heap.Init(&pq)
 
-	// Използваме map за по-ефективно съхранение на вече посетените възли
+	// Using map to store already visited nodes for better efficiency
 	nodes := make(map[data.Position]*Node)
 
 	startNode := &Node{Position: start, Cost: 0, Priority: heuristic(start, goal)}
@@ -51,36 +51,36 @@ func CalculatePath(g *game.Grid, start, goal data.Position) ([]data.Position, in
 			return path, len(path), true
 		}
 
-		// Генериране на съседи с подобрена логика
+		// Generating neighbors
 		for _, dir := range directions {
 			neighborPos := data.Position{X: current.X + dir.X, Y: current.Y + dir.Y}
 
-			// Проверка дали съседът е в границите на картата
+			// Check if neighbor is in map range
 			if neighborPos.X < 0 || neighborPos.X >= g.Width || neighborPos.Y < 0 || neighborPos.Y >= g.Height {
 				continue
 			}
 
-			// ПРОМЕНЕНО: Проверка за "рязане" на ъгли при диагонално движение
+			// Check for corner cutting
 			if dir.X != 0 && dir.Y != 0 { // Ако е диагонал
-				// Проверяваме дали съседните плочки по X и Y са проходими
+				// Additional checks around.
 				if g.CollisionGrid[current.Y][current.X+dir.X] > game.CollisionTypeWalkable || g.CollisionGrid[current.Y+dir.Y][current.X] > game.CollisionTypeWalkable {
 					continue
 				}
 			}
 
-			// Изчисляване на цената за движение до този съсед
+			// Calculate prices to move to neighbor
 			newCost := current.Cost + getCost(g, neighborPos)
 
-			// ПРОМЕНЕНО: Добавяне на "наказание" за смяна на посоката, за да се избегне зигзаг
+			// Added "punishment" for changing directions to eliminate zig-zag
 			if current.Parent != nil {
 				curDirX, curDirY := direction(current.Parent.Position, current.Position)
 				newDirX, newDirY := direction(current.Position, neighborPos)
 				if curDirX != newDirX || curDirY != newDirY {
-					newCost++ // Малко наказание за завой
+					newCost++ // Punishment for turning
 				}
 			}
 
-			// Ако сме намерили по-добър път до този съсед
+			// If we found a better path to this neighbor
 			if node, found := nodes[neighborPos]; !found || newCost < node.Cost {
 				priority := newCost + heuristic(neighborPos, goal)
 				neighborNode := &Node{
@@ -98,7 +98,7 @@ func CalculatePath(g *game.Grid, start, goal data.Position) ([]data.Position, in
 	return nil, 0, false
 }
 
-// ПРОМЕНЕНО: getCost вече взима предвид и съседните плочки
+// Changed: getCost calculates neighbors too
 func getCost(grid *game.Grid, pos data.Position) int {
 	baseCost := 0
 	tileType := grid.CollisionGrid[pos.Y][pos.X]
@@ -113,16 +113,16 @@ func getCost(grid *game.Grid, pos data.Position) int {
 	case game.CollisionTypeLowPriority:
 		baseCost = 20
 	default:
-		return math.MaxInt32 // Непроходимо
+		return math.MaxInt32 // blocked
 	}
 
-	// ПРОМЕНЕНО: Добавяне на "наказание" за близост до стени/препятствия
-	// Това кара пътеката да стои по-далеч от стените
+	// CHANGED: Add "penalty" for proximity to walls/obstacles
+	// This makes the path stay further away from walls
 	for _, d := range directions {
 		checkPos := data.Position{X: pos.X + d.X, Y: pos.Y + d.Y}
 		if checkPos.X >= 0 && checkPos.X < grid.Width && checkPos.Y >= 0 && checkPos.Y < grid.Height {
 			if grid.CollisionGrid[checkPos.Y][checkPos.X] == game.CollisionTypeNonWalkable {
-				baseCost += 2 // Добавяме допълнителна цена, ако е до стена
+				baseCost += 2 // We add an additional cost if it is next to a wall
 			}
 		}
 	}
@@ -131,7 +131,7 @@ func getCost(grid *game.Grid, pos data.Position) int {
 }
 
 func heuristic(a, b data.Position) int {
-	// Манхатън разстояние с лека корекция за диагонали
+	// 
 	dx := math.Abs(float64(a.X - b.X))
 	dy := math.Abs(float64(a.Y - b.Y))
 	return int(dx + dy)

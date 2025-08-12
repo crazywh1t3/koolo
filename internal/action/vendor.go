@@ -46,7 +46,7 @@ func VendorRefill(forceRefill, sellJunk bool) error {
 	if sellJunk {
 		ctx.Logger.Info("Selling junk items first...")
 		town.SellJunk()
-		// Опресняваме данните след продажба, за да се актуализира златото
+		// Refresh after selling, so we can update gold.
 		ctx.RefreshGameData()
 	}
 
