@@ -14,16 +14,21 @@ import (
 )
 
 const (
-	// Positioning constants
-	PoisonNovaMinDistance = 4
-	PoisonNovaMaxDistance = 12
+	PoisonNovaMinDistance      = 4
+	PoisonNovaMaxDistance      = 12
+	LowerResistMinDistance     = 18
+	LowerResistMaxDistance     = 25
+	CorpseExplosionMaxDistance = 15
+	AmplifyDamageMinDistance   = 18
+	AmplifyDamageMaxDistance   = 25
+	LowerResistThreshold       = 80
+	MonsterDensityThreshold    = 3
 )
 
 type PoisonNovaNecro struct {
 	BaseCharacter
 }
 
-// CheckKeyBindings ensures that all the required skills for the build are bound to a key.
 func (p PoisonNovaNecro) CheckKeyBindings() []skill.ID {
 	requiredKeybindings := []skill.ID{
 		skill.PoisonNova,
@@ -31,55 +36,41 @@ func (p PoisonNovaNecro) CheckKeyBindings() []skill.ID {
 		skill.AmplifyDamage,
 		skill.CorpseExplosion,
 		skill.BoneArmor,
-		skill.Revive,
+		skill.Teleport,
 		skill.TomeOfTownPortal,
 	}
-
-	// Teleport is optional, but recommended
-	if p.CharacterCfg.Character.UseTeleport {
-		requiredKeybindings = append(requiredKeybindings, skill.Teleport)
-	}
-
 	missingKeybindings := []skill.ID{}
-
-	for _, s := range requiredKeybindings {
-		if _, found := p.Data.KeyBindings.KeyBindingForSkill(s); !found {
-			missingKeybindings = append(missingKeybindings, s)
+	for _, cskill := range requiredKeybindings {
+		if _, found := p.Data.KeyBindings.KeyBindingForSkill(cskill); !found {
+			missingKeybindings = append(missingKeybindings, cskill)
 		}
 	}
-
 	if len(missingKeybindings) > 0 {
 		p.Logger.Debug("There are missing required key bindings.", slog.Any("Bindings", missingKeybindings))
 	}
-
 	return missingKeybindings
 }
 
-// BuffSkills defines the skills that should be cast as buffs.
+func (p PoisonNovaNecro) PreCTABuffSkills() []skill.ID {
+	return []skill.ID{skill.BattleCommand, skill.BattleOrders}
+}
+
 func (p PoisonNovaNecro) BuffSkills() []skill.ID {
-	// Bone Armor is the primary buff for this build.
 	return []skill.ID{skill.BoneArmor}
 }
 
-// PreCTABuffSkills defines skills to be cast before switching to CTA.
-func (p PoisonNovaNecro) PreCTABuffSkills() []skill.ID {
-	return []skill.ID{}
-}
-
-// KillMonsterSequence defines the main attack rotation for the Poison Nova Necromancer.
 func (p PoisonNovaNecro) KillMonsterSequence(
 	monsterSelector func(d game.Data) (data.UnitID, bool),
 	skipOnImmunities []stat.Resist,
 ) error {
 	ctx := context.Get()
-
-	id, found := monsterSelector(*p.Data)
-	if !found {
-		return nil // No monsters found
-	}
-
 	for {
 		ctx.PauseIfNotPriority()
+
+		id, found := monsterSelector(*p.Data)
+		if !found {
+			return nil
+		}
 
 		if !p.preBattleChecks(id, skipOnImmunities) {
 			return nil
@@ -87,97 +78,72 @@ func (p PoisonNovaNecro) KillMonsterSequence(
 
 		monster, found := p.Data.Monsters.FindByID(id)
 		if !found || monster.Stats[stat.Life] <= 0 {
-			return nil // Monster is already dead or gone
-		}
-
-		// 1. Cast Lower Resist
-		if err := step.SecondaryAttack(skill.LowerResist, monster.UnitID, 1, step.Distance(5, 10)); err != nil {
-			p.Logger.Warn("Failed to cast Lower Resist", slog.String("error", err.Error()))
-		}
-
-		// 2. Cast Poison Nova
-		if err := step.SecondaryAttack(skill.PoisonNova, monster.UnitID, 2, step.Distance(PoisonNovaMinDistance, PoisonNovaMaxDistance)); err != nil {
-			p.Logger.Warn("Failed to cast Poison Nova", slog.String("error", err.Error()))
-		}
-
-		// 3. Actively wait for a corpse to appear
-		var corpse data.Monster
-		foundCorpse := false
-		for i := 0; i < 16; i++ { // Wait for up to 4 seconds (16 * 250ms)
-			corpse, foundCorpse = p.findCorpse()
-			if foundCorpse {
-				break
-			}
-			time.Sleep(time.Millisecond * 250)
-		}
-
-		// 4. If a corpse was found, start the chain reaction
-		if foundCorpse {
-			// 5. Cast Amplify Damage near the corpse to affect nearby enemies
-			step.SecondaryAttack(skill.AmplifyDamage, monster.UnitID, 1, step.Distance(5, 10))
-
-			// 6. Spam Corpse Explosion
-			for i := 0; i < 10; i++ {
-				step.SecondaryAttack(skill.CorpseExplosion, corpse.UnitID, 1)
-				time.Sleep(time.Millisecond * 250)
-
-				// Check if there are any enemies left nearby, if not, we can stop exploding
-				enemiesNearby := false
-				for _, m := range p.Data.Monsters.Enemies() {
-					if m.Stats[stat.Life] > 0 {
-						enemiesNearby = true
-						break
-					}
-				}
-				if !enemiesNearby {
-					break
-				}
-			}
-		}
-
-		// 7. Revive minions after the fight
-		p.reviveMinions()
-
-		// Check if there are still monsters to kill for the next loop iteration
-		id, found = monsterSelector(*p.Data)
-		if !found {
 			return nil
 		}
-	}
-}
 
-// findCorpse looks for the first available corpse on the screen.
-func (p PoisonNovaNecro) findCorpse() (data.Monster, bool) {
-	for _, monster := range p.Data.Monsters.Enemies() {
-		if monster.Stats[stat.Life] <= 0 {
-			return monster, true
+		// Repositioning against high monster density
+		if len(p.Data.Monsters.Enemies()) > MonsterDensityThreshold {
+			if _, hasTeleport := p.Data.KeyBindings.KeyBindingForSkill(skill.Teleport); hasTeleport {
+				step.SecondaryAttack(skill.Teleport, monster.UnitID, 0, step.Distance(5, 7))
+			}
 		}
-	}
 
-	return data.Monster{}, false
-}
-
-// reviveMinions casts Revive on available corpses.
-func (p PoisonNovaNecro) reviveMinions() {
-	petCount := 0
-	for _, m := range p.Data.Monsters {
-		if m.IsPet() {
-			petCount++
+		// 1. Lower Resist
+		if p.shouldCastLowerResist(monster) {
+			step.SecondaryAttack(skill.LowerResist, monster.UnitID, 1, step.RangedDistance(LowerResistMinDistance, LowerResistMaxDistance))
 		}
-	}
 
-	// We want to have 10 revives.
-	if petCount < 10 {
-		for _, monster := range p.Data.Monsters.Enemies() {
-			if monster.Stats[stat.Life] <= 0 { // Is a corpse
-				step.SecondaryAttack(skill.Revive, monster.UnitID, 1)
-				time.Sleep(time.Millisecond * 300) // Pause to allow revive animation
+		// 2. Poison Nova
+		step.SecondaryAttack(skill.PoisonNova, monster.UnitID, 2, step.RangedDistance(PoisonNovaMinDistance, PoisonNovaMaxDistance))
+
+		// 3. Amplify Damage
+		step.SecondaryAttack(skill.AmplifyDamage, monster.UnitID, 1, step.RangedDistance(AmplifyDamageMinDistance, AmplifyDamageMaxDistance))
+
+		// Give poison a little bit of time to create a corpse
+		time.Sleep(time.Millisecond * 300)
+
+		// 4. Corpse Explosion Workaround: Target living enemies with CE selected.
+		// The game engine will find the nearest corpse to explode.
+		for i := 0; i < 5; i++ {
+			// Target the initial monster
+			step.SecondaryAttack(skill.CorpseExplosion, monster.UnitID, 1)
+
+			// Target other nearby enemies as well
+			for _, m := range p.Data.Monsters.Enemies() {
+				if m.UnitID != monster.UnitID {
+					step.SecondaryAttack(skill.CorpseExplosion, m.UnitID, 1)
+					break // Move to next CE loop iteration after finding one more enemy
+				}
 			}
 		}
 	}
 }
 
-// killMonsterByName is a generic function to kill a specific monster.
+func (p PoisonNovaNecro) shouldCastLowerResist(monster data.Monster) bool {
+	maxLife := float64(monster.Stats[stat.MaxLife])
+	if maxLife == 0 {
+		return false
+	}
+
+	hpPercentage := (float64(monster.Stats[stat.Life]) / maxLife) * 100
+	return hpPercentage > LowerResistThreshold
+}
+
+func (p PoisonNovaNecro) killBoss(bossID npc.ID, monsterType data.MonsterType) error {
+	ctx := context.Get()
+	for {
+		ctx.PauseIfNotPriority()
+
+		boss, found := p.Data.Monsters.FindOne(bossID, monsterType)
+		if !found || boss.Stats[stat.Life] <= 0 {
+			return nil
+		}
+
+		step.SecondaryAttack(skill.LowerResist, boss.UnitID, 1, step.Distance(LowerResistMinDistance, LowerResistMaxDistance))
+		step.SecondaryAttack(skill.PoisonNova, boss.UnitID, 1, step.Distance(PoisonNovaMinDistance, PoisonNovaMaxDistance))
+	}
+}
+
 func (p PoisonNovaNecro) killMonsterByName(id npc.ID, monsterType data.MonsterType, skipOnImmunities []stat.Resist) error {
 	return p.KillMonsterSequence(func(d game.Data) (data.UnitID, bool) {
 		if m, found := d.Monsters.FindOne(id, monsterType); found {
@@ -187,53 +153,60 @@ func (p PoisonNovaNecro) killMonsterByName(id npc.ID, monsterType data.MonsterTy
 	}, skipOnImmunities)
 }
 
-// KillAndariel implements the logic to kill Andariel.
 func (p PoisonNovaNecro) KillAndariel() error {
-	return p.killMonsterByName(npc.Andariel, data.MonsterTypeUnique, nil)
+	return p.killBoss(npc.Andariel, data.MonsterTypeUnique)
 }
 
-// KillDuriel implements the logic to kill Duriel.
 func (p PoisonNovaNecro) KillDuriel() error {
-	return p.killMonsterByName(npc.Duriel, data.MonsterTypeUnique, nil)
+	return p.killBoss(npc.Duriel, data.MonsterTypeUnique)
 }
 
-// KillMephisto implements the logic to kill Mephisto.
 func (p PoisonNovaNecro) KillMephisto() error {
-	return p.killMonsterByName(npc.Mephisto, data.MonsterTypeUnique, nil)
+	return p.killBoss(npc.Mephisto, data.MonsterTypeUnique)
 }
 
-// KillDiablo implements the logic to kill Diablo.
 func (p PoisonNovaNecro) KillDiablo() error {
-	return p.KillMonsterSequence(func(d game.Data) (data.UnitID, bool) {
-		diablo, found := d.Monsters.FindOne(npc.Diablo, data.MonsterTypeUnique)
-		if !found {
-			return 0, false
+	timeout := time.Second * 20
+	startTime := time.Now()
+	diabloFound := false
+
+	for {
+		if time.Since(startTime) > timeout && !diabloFound {
+			p.Logger.Error("Diablo was not found, timeout reached")
+			return nil
 		}
-		return diablo.UnitID, true
-	}, nil)
+
+		diablo, found := p.Data.Monsters.FindOne(npc.Diablo, data.MonsterTypeUnique)
+		if !found || diablo.Stats[stat.Life] <= 0 {
+			if diabloFound {
+				return nil
+			}
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
+		diabloFound = true
+		p.Logger.Info("Diablo detected, attacking")
+		return p.killBoss(npc.Diablo, data.MonsterTypeUnique)
+	}
 }
 
-// KillBaal implements the logic to kill Baal.
 func (p PoisonNovaNecro) KillBaal() error {
-	return p.killMonsterByName(npc.BaalCrab, data.MonsterTypeUnique, nil)
+	return p.killBoss(npc.BaalCrab, data.MonsterTypeUnique)
 }
 
-// KillCountess implements the logic to kill the Countess.
 func (p PoisonNovaNecro) KillCountess() error {
 	return p.killMonsterByName(npc.DarkStalker, data.MonsterTypeSuperUnique, nil)
 }
 
-// KillSummoner implements the logic to kill the Summoner.
 func (p PoisonNovaNecro) KillSummoner() error {
 	return p.killMonsterByName(npc.Summoner, data.MonsterTypeUnique, nil)
 }
 
-// KillIzual implements the logic to kill Izual.
 func (p PoisonNovaNecro) KillIzual() error {
-	return p.killMonsterByName(npc.Izual, data.MonsterTypeUnique, nil)
+	return p.killBoss(npc.Izual, data.MonsterTypeUnique)
 }
 
-// KillCouncil implements the logic to kill the High Council.
 func (p PoisonNovaNecro) KillCouncil() error {
 	return p.KillMonsterSequence(func(d game.Data) (data.UnitID, bool) {
 		for _, m := range d.Monsters.Enemies() {
@@ -245,12 +218,10 @@ func (p PoisonNovaNecro) KillCouncil() error {
 	}, nil)
 }
 
-// KillPindle implements the logic to kill Pindleskin.
 func (p PoisonNovaNecro) KillPindle() error {
 	return p.killMonsterByName(npc.DefiledWarrior, data.MonsterTypeSuperUnique, p.CharacterCfg.Game.Pindleskin.SkipOnImmunities)
 }
 
-// KillNihlathak implements the logic to kill Nihlathak.
 func (p PoisonNovaNecro) KillNihlathak() error {
 	return p.killMonsterByName(npc.Nihlathak, data.MonsterTypeSuperUnique, nil)
 }
